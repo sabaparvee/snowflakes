@@ -1,0 +1,293 @@
+// Creating ORDERS table
+
+CREATE OR REPLACE TABLE OUR_FIRST_DB.PUBLIC.ORDERS (
+    ORDER_ID VARCHAR(30),
+    AMOUNT INT,
+    PROFIT INT,
+    QUANTITY INT,
+    CATEGORY VARCHAR(30),
+    SUBCATEGORY VARCHAR(30));
+    
+SELECT * FROM OUR_FIRST_DB.PUBLIC.ORDERS;
+   
+// First copy command
+
+COPY INTO OUR_FIRST_DB.PUBLIC.ORDERS
+    FROM @aws_stage
+    file_format = (type = csv field_delimiter=',' skip_header=1);
+
+
+
+
+
+
+// Copy command with fully qualified stage object
+
+COPY INTO OUR_FIRST_DB.PUBLIC.ORDERS
+    FROM @MANAGE_DB.external_stages.aws_stage
+    file_format= (type = csv field_delimiter=',' skip_header=1);
+
+
+
+
+// List files contained in stage
+
+LIST @MANAGE_DB.external_stages.aws_stage;    
+
+
+
+
+// Copy command with specified file(s)
+
+COPY INTO OUR_FIRST_DB.PUBLIC.ORDERS
+    FROM @MANAGE_DB.external_stages.aws_stage
+    file_format= (type = csv field_delimiter=',' skip_header=1)
+    files = ('OrderDetails.csv');
+    
+
+
+
+// Copy command with pattern for file names
+
+COPY INTO OUR_FIRST_DB.PUBLIC.ORDERS
+    FROM @MANAGE_DB.external_stages.aws_stage
+    file_format= (type = csv field_delimiter=',' skip_header=1)
+    pattern='.*Order.*';
+
+
+
+
+// Database to manage stage objects, fileformats etc.
+
+CREATE OR REPLACE DATABASE MANAGE_DB;
+
+CREATE OR REPLACE SCHEMA external_stages;
+
+
+// Creating external stage
+
+CREATE OR REPLACE STAGE MANAGE_DB.external_stages.aws_stage
+    url='s3://bucketsnowflakes3'
+    credentials=(aws_key_id='ABCD_DUMMY_ID' aws_secret_key='1234abcd_key');
+
+
+// Description of external stage
+
+DESC STAGE MANAGE_DB.external_stages.aws_stage; 
+    
+    
+// Alter external stage   
+
+ALTER STAGE aws_stage
+    SET credentials=(aws_key_id='XYZ_DUMMY_ID' aws_secret_key='987xyz');
+    
+    
+// Publicly accessible staging area    
+
+CREATE OR REPLACE STAGE MANAGE_DB.external_stages.aws_stage
+    url='s3://bucketsnowflakes3';
+
+// List files in stage
+
+LIST @aws_stage;
+
+//Load data using copy command
+
+COPY INTO OUR_FIRST_DB.PUBLIC.ORDERS
+    FROM @aws_stage
+    file_format= (type = csv field_delimiter=',' skip_header=1)
+    pattern='.*Order.*';
+
+//Rename data base & creating the table + meta data
+
+ALTER DATABASE FIRST_DB RENAME TO OUR_FIRST_DB; 
+
+CREATE TABLE "OUR_FIRST_DB"."PUBLIC"."LOAN_PAYMENT" (
+  "Loan_ID" STRING,
+  "loan_status" STRING,
+  "Principal" STRING,
+  "terms" STRING,
+  "effective_date" STRING,
+  "due_date" STRING,
+  "paid_off_time" STRING,
+  "past_due_days" STRING,
+  "age" STRING,
+  "education" STRING,
+  "Gender" STRING);
+  
+  
+ //Check that table is empy
+ USE DATABASE OUR_FIRST_DB;
+
+ SELECT * FROM LOAN_PAYMENT;
+
+ 
+ //Loading the data from S3 bucket
+  
+ COPY INTO LOAN_PAYMENT
+    FROM s3://bucketsnowflakes3/Loan_payments_data.csv
+    file_format = (type = csv 
+                   field_delimiter = ',' 
+                   skip_header=1);
+    
+
+//Validate
+ SELECT * FROM LOAN_PAYMENT;
+
+
+   
+---- Use files with errors ----
+CREATE OR REPLACE STAGE COPY_DB.PUBLIC.aws_stage_copy
+    url='s3://snowflakebucket-copyoption/returnfailed/';
+
+LIST @COPY_DB.PUBLIC.aws_stage_copy;    
+
+
+
+COPY INTO COPY_DB.PUBLIC.ORDERS
+    FROM @aws_stage_copy
+    file_format= (type = csv field_delimiter=',' skip_header=1)
+    pattern='.*Order.*'
+    VALIDATION_MODE = RETURN_ERRORS;
+
+
+
+COPY INTO COPY_DB.PUBLIC.ORDERS
+    FROM @aws_stage_copy
+    file_format= (type = csv field_delimiter=',' skip_header=1)
+    pattern='.*Order.*'
+    VALIDATION_MODE = RETURN_1_rows;
+    
+
+
+
+-------------- Working with error results -----------
+
+---- 1) Saving rejected files after VALIDATION_MODE ---- 
+
+CREATE OR REPLACE TABLE  COPY_DB.PUBLIC.ORDERS (
+    ORDER_ID VARCHAR(30),
+    AMOUNT VARCHAR(30),
+    PROFIT INT,
+    QUANTITY INT,
+    CATEGORY VARCHAR(30),
+    SUBCATEGORY VARCHAR(30));
+
+
+COPY INTO COPY_DB.PUBLIC.ORDERS
+    FROM @aws_stage_copy
+    file_format= (type = csv field_delimiter=',' skip_header=1)
+    pattern='.*Order.*'
+    VALIDATION_MODE = RETURN_ERRORS;
+
+
+// Storing rejected /failed results in a table
+CREATE OR REPLACE TABLE rejected AS 
+select rejected_record from table(result_scan(last_query_id()));
+
+
+
+-- Adding additional records --
+INSERT INTO rejected
+select rejected_record from table(result_scan(last_query_id()));
+
+SELECT * FROM rejected;
+
+
+
+
+---- 2) Saving rejected files without VALIDATION_MODE ---- 
+
+
+
+
+
+COPY INTO COPY_DB.PUBLIC.ORDERS
+    FROM @aws_stage_copy
+    file_format= (type = csv field_delimiter=',' skip_header=1)
+    pattern='.*Order.*'
+    ON_ERROR=CONTINUE;
+  
+  
+select * from table(validate(orders, job_id => '_last'));
+
+
+---- 3) Working with rejected records ---- 
+
+
+
+SELECT REJECTED_RECORD FROM rejected;
+
+CREATE OR REPLACE TABLE rejected_values as
+SELECT 
+SPLIT_PART(rejected_record,',',1) as ORDER_ID, 
+SPLIT_PART(rejected_record,',',2) as AMOUNT, 
+SPLIT_PART(rejected_record,',',3) as PROFIT, 
+SPLIT_PART(rejected_record,',',4) as QUATNTITY, 
+SPLIT_PART(rejected_record,',',5) as CATEGORY, 
+SPLIT_PART(rejected_record,',',6) as SUBCATEGORY
+FROM rejected; 
+
+
+SELECT * FROM rejected_values;
+---- VALIDATION_MODE ----
+// Prepare database & table
+CREATE OR REPLACE DATABASE COPY_DB;
+
+
+CREATE OR REPLACE TABLE  COPY_DB.PUBLIC.ORDERS (
+    ORDER_ID VARCHAR(30),
+    AMOUNT VARCHAR(30),
+    PROFIT INT,
+    QUANTITY INT,
+    CATEGORY VARCHAR(30),
+    SUBCATEGORY VARCHAR(30));
+
+// Prepare stage object
+CREATE OR REPLACE STAGE COPY_DB.PUBLIC.aws_stage_copy
+    url='s3://snowflakebucket-copyoption/size/';
+  
+LIST @COPY_DB.PUBLIC.aws_stage_copy;
+  
+    
+ //Load data using copy command
+COPY INTO COPY_DB.PUBLIC.ORDERS
+    FROM @aws_stage_copy
+    file_format= (type = csv field_delimiter=',' skip_header=1)
+    pattern='.*Order.*'
+    VALIDATION_MODE = RETURN_ERRORS;
+    
+SELECT * FROM ORDERS;    
+    
+COPY INTO COPY_DB.PUBLIC.ORDERS
+    FROM @aws_stage_copy
+    file_format= (type = csv field_delimiter=',' skip_header=1)
+    pattern='.*Order.*'
+   VALIDATION_MODE = RETURN_5_ROWS ;
+
+
+
+--- Use files with errors ---
+
+create or replace stage copy_db.public.aws_stage_copy
+    url ='s3://snowflakebucket-copyoption/returnfailed/';
+    
+list @copy_db.public.aws_stage_copy;
+
+-- show all errors --
+copy into copy_db.public.orders
+    from @copy_db.public.aws_stage_copy
+    file_format = (type=csv field_delimiter=',' skip_header=1)
+    pattern='.*Order.*'
+    validation_mode=return_errors;
+
+-- validate first n rows --
+copy into copy_db.public.orders
+    from @copy_db.public.aws_stage_copy
+    file_format = (type=csv field_delimiter=',' skip_header=1)
+    pattern='.*error.*'
+    validation_mode=return_1_rows;
+    
+    
+    
+
